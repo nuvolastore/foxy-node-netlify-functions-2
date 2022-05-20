@@ -11,26 +11,34 @@ exports.handler = async (requestEvent) => {
   if (!validation.input.validate(requestEvent)) {
     return validation.input.response();
   }
+  console.log("Passed validation");
   const items = extractItems(requestEvent.body);
   const patchedItems = [];
   const cache = createCache();
   try {
     //Go through the array of foxy items
-    items.forEach((item) => {
-      const foxyItemInfo = {
-        code: item.code,
-        quantity: item.quantity,
-        size: getOption(item, "Taglia"),
-      };
-      // Fetch items and patch the size according to the quantity
-      fetchItem(cache, foxyItemInfo).then((wfItem) => {
-        console.log("I'm the fetched Item from webflow: ", wfItem);
-        const patchedSizeItem = updateInventorySizeField(foxyItemInfo, wfItem);
-        const patchedItem = patchItem(patchedSizeItem);
-        patchedItems.push(patchedItem);
-      });
-    });
+    await Promise.all(
+      items.map(async (item) => {
+        const foxyItemInfo = {
+          code: item.code,
+          quantity: item.quantity,
+          size: getOption(item, "Taglia"),
+        };
+        console.log("Going through this item, ", foxyItemInfo);
 
+        // Fetch items and patch the size according to the quantity
+        await fetchItem(cache, foxyItemInfo).then(async (wfItem) => {
+          console.log("I'm the fetched Item from webflow: ", wfItem);
+          const patchedSizeItem = updateInventorySizeField(
+            foxyItemInfo,
+            wfItem
+          );
+          const patchedItem = await patchItem(patchedSizeItem);
+          patchedItems.push(patchedItem);
+        });
+      })
+    );
+    console.log("Patched Items: ", patchedItems);
     return {
       body: JSON.stringify({ ok: true, patchedItems: patchedItems }),
       statusCode: 200,
@@ -77,14 +85,14 @@ function getWebflow() {
  * @param {object} item item info to update it's size
  * @returns {object} patched item with updated fields
  */
-function patchItem(item) {
+async function patchItem(item) {
   const collectionId = webFlowCollectionID;
   const webflow = getWebflow();
-  return webflow.patchItem(
+  return await webflow.patchItem(
     {
       collectionId: collectionId,
       fields: {
-        "size:quantity": item["size:quantity"],
+        "size-quantity": item["size-quantity"],
       },
       itemId: item._id,
     },
@@ -102,7 +110,7 @@ function patchItem(item) {
  */
 function updateInventorySizeField(foxyItem, webFlowItem) {
   const { quantity, size } = foxyItem;
-  let wfSizeObject = webFlowItem["size:quantity"]
+  let wfSizeObject = webFlowItem["size-quantity"]
     .split(",")
     .map((size) => size.split(":"));
   wfSizeObject = Object.fromEntries(wfSizeObject);
@@ -111,7 +119,8 @@ function updateInventorySizeField(foxyItem, webFlowItem) {
     wfSizeObject[size.value] =
       Number(wfSizeObject[size.value]) - Number(quantity);
 
-  webFlowItem["size:quantity"] = objToString(wfSizeObject);
+  webFlowItem["size-quantity"] = objToString(wfSizeObject);
+  console.log("I'm the webflowItem Patched to send: ", webFlowItem);
   return webFlowItem;
 }
 
