@@ -4,7 +4,47 @@ const { config } = require("../../../config.js");
 const webFlowCollectionID = config.datastore.provider.webflow.collection;
 
 exports.handler = async (requestEvent) => {
-  console.log(requestEvent.body);
+  // Validation
+  if (!validation.configuration.validate()) {
+    return validation.configuration.response();
+  }
+  if (!validation.input.validate(requestEvent)) {
+    return validation.input.response();
+  }
+  const items = extractItems(requestEvent.body);
+  const patchedItems = [];
+  const cache = createCache();
+  try {
+    //Go through the array of foxy items
+    items.forEach((item) => {
+      const foxyItemInfo = {
+        code: item.code,
+        quantity: item.quantity,
+        size: getOption(item, "Taglia"),
+      };
+      // Fetch items and patch the size according to the quantity
+      fetchItem(cache, foxyItemInfo).then((wfItem) => {
+        console.log("I'm the fetched Item from webflow: ", wfItem);
+        const patchedSizeItem = updateInventorySizeField(foxyItemInfo, wfItem);
+        const patchedItem = patchItem(patchedSizeItem);
+        patchedItems.push(patchedItem);
+      });
+    });
+
+    return {
+      body: JSON.stringify({ ok: true, patchedItems: patchedItems }),
+      statusCode: 200,
+    };
+  } catch (error) {
+    console.error(error);
+    return {
+      body: JSON.stringify({
+        details: "An internal error has occurred",
+        ok: false,
+      }),
+      statusCode: 500,
+    };
+  }
 };
 
 // Helper functions
@@ -32,6 +72,65 @@ function getWebflow() {
 }
 
 /**
+ * Patches fields of a product in the Webflow Product CMS Collection, returns the patched items in an object.
+ *
+ * @param {object} item item info to update it's size
+ * @returns {object} patched item with updated fields
+ */
+function patchItem(item) {
+  const collectionId = webFlowCollectionID;
+  const webflow = getWebflow();
+  return webflow.patchItem(
+    {
+      collectionId: collectionId,
+      fields: {
+        size: "",
+      },
+      itemId: item._id,
+    },
+    { live: true }
+  );
+}
+
+/**
+ * Parses the size's filed string and updates it according to the foxyItem
+ * returns the updated Item with the resulting size inventory
+ *
+ * @param {object} foxyItem with info on quantity and size
+ * @param {object} webFlowItem the item as it's in the CMS collection that needs to be updated
+ * @returns {object} item with updated size field
+ */
+function updateInventorySizeField(foxyItem, webFlowItem) {
+  const { quantity, size } = foxyItem;
+  let wfSizeObject = webFlowItem["size:quantity"]
+    .split(",")
+    .map((size) => size.split(":"));
+  wfSizeObject = Object.fromEntries(wfSizeObject);
+
+  if (wfSizeObject[size.value] !== "0")
+    wfSizeObject[size.value] =
+      Number(wfSizeObject[size.value]) - Number(quantity);
+
+  webFlowItem["size:quantity"] = objToString(wfSizeObject);
+  return webFlowItem;
+}
+
+/**
+ * Converts and object with sizes and quantities, into a string
+ *
+ * @param {object} obj Sizes object
+ * @returns {string} string of updated size values
+ *
+ * */
+function objToString(obj) {
+  return Object.entries(obj).reduce((str, [p, val], index, array) => {
+    if (index === array.length - 1) return `${str}${p}:${val}`;
+
+    return `${str}${p}:${val},`;
+  }, "");
+}
+
+/**
  * Returns a recursive promise that fetches items from the collection until it
  * finds the item. Resolves the found item.
  *
@@ -47,6 +146,8 @@ function getWebflow() {
  * @returns {Promise<{object}>} a promise for the item from Webflow
  */
 function fetchItem(cache, foxyItem, offset = 0) {
+  const WEBFLOW_LIMIT = 100;
+
   if (offset > 500) {
     console.log("   ... giving up.");
     return Promise.reject(new Error("Item not found"));
@@ -54,27 +155,27 @@ function fetchItem(cache, foxyItem, offset = 0) {
   if (offset) {
     console.log("   ... couldn't find the item in first", offset, "items.");
   }
-  const collectionId = getCollectionId(foxyItem);
+  const collectionId = webFlowCollectionID;
   const webflow = getWebflow();
   const found = cache.findItem(collectionId, foxyItem);
   if (found) {
-    return Promise.resolve(enrichFetchedItem(found, foxyItem));
+    return Promise.resolve(found);
   }
   return new Promise((resolve, reject) => {
     webflow
       .items(
         { collectionId },
         {
-          limit: customOptions().webflow.limit,
+          limit: WEBFLOW_LIMIT,
           offset,
-          sort: [getCustomKey("code"), "ASC"],
+          sort: ["code", "ASC"],
         }
       )
       .then((collection) => {
         cache.addItems(collectionId, collection.items);
         let code_exists = null;
         const match = collection.items.find((e) => {
-          const wfItemCode = iGet(e, getCustomKey("code"));
+          const wfItemCode = iGet(e, "code");
           if (wfItemCode === undefined) {
             if (code_exists === null) {
               code_exists = false;
@@ -88,20 +189,17 @@ function fetchItem(cache, foxyItem, offset = 0) {
         });
         if (code_exists === false) {
           reject(
-            new Error(`Could not find the code field (${getCustomKey(
-              "code"
-            )}) in Webflow.
+            new Error(`Could not find the code field code in Webflow.
               this field must exist and not be empty for all items in the collection.`)
           );
         } else {
           if (match) {
-            resolve(enrichFetchedItem(match, foxyItem));
+            resolve(match);
           } else if (collection.total > collection.offset + collection.count) {
             fetchItem(
               cache,
               foxyItem,
-              (offset / customOptions().webflow.limit + 1) *
-                customOptions().webflow.limit
+              (offset / WEBFLOW_LIMIT + 1) * WEBFLOW_LIMIT
             )
               .then((i) => resolve(i))
               .catch((e) => {
@@ -154,7 +252,7 @@ function createCache() {
       }
       return this.cache[collection].find((e) => {
         const itemCode = item.code;
-        const wfCode = getCustomizableOption(e, "code").value;
+        const wfCode = getOption(e, "code").value;
         return (
           itemCode &&
           wfCode &&
@@ -193,3 +291,42 @@ const validation = {
     },
   },
 };
+
+/**
+ * Returns a value from an object given a case-insensitive key
+ *
+ * @param {object} object the object to get the value from
+ * @param {string} key field to get the value from
+ * @returns {any} the value stored in the key
+ */
+function iGet(object, key) {
+  const numbered = new RegExp(key.toLowerCase().trim() + "(-\\d+)?");
+  const existingKey = Object.keys(object)
+    .filter((k) => k.toLowerCase().trim().match(numbered))
+    .sort();
+  return object[existingKey[0]];
+}
+
+/**
+ * Get an option of an item.
+ *
+ * The option may be set in the object itself or in the fx:item_options property of the _embedded attribute
+ *
+ * @param {object} item the item that should have the option
+ * @param {string} option to be retrieved
+ * @returns {{}|{name: string, value: string|number}} name and value of the option
+ *  returns an empty object if the option is not available
+ */
+function getOption(item, option) {
+  let found = iGet(item, option);
+  if (found) return { name: option, value: iGet(item, option) };
+  if (item._embedded) {
+    if (item._embedded["fx:item_options"]) {
+      found = item._embedded["fx:item_options"].find(
+        (e) => e.name.toLowerCase().trim() === option.toLowerCase().trim()
+      );
+      if (found) return found;
+    }
+  }
+  return {};
+}
