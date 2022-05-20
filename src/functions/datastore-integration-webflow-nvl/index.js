@@ -47,7 +47,7 @@ exports.handler = async (requestEvent) => {
   }
 };
 
-// Helper functions
+// ------------Helper functions-------------
 
 /**
  * Retrieve the Webflow Token
@@ -84,7 +84,7 @@ function patchItem(item) {
     {
       collectionId: collectionId,
       fields: {
-        size: "",
+        "size:quantity": item["size:quantity"],
       },
       itemId: item._id,
     },
