@@ -1,6 +1,11 @@
 [build]
   command = "npm i"
   functions = "src/functions"
+
 [template.environment]
-  SECRET_TOKEN = "change me for your secret token"
-  CUSTOM_LOGO = "set the url to your custom logo here"
+  WEBFLOW_TOKEN= "Add the WEBFLOW_TOKEN credential here"
+  FOXY_WEBFLOW_COLLECTION= "Add the FOXY_WEBFLOW_COLLECTION credential here"
+  FOXY_API_CLIENT_ID= "Add the FOXY_API_CLIENT_ID credential here"
+  FOXY_API_CLIENT_SECRET= "Add the FOXY_API_CLIENT_SECRET credential here"
+  FOXY_API_REFRESH_TOKEN= "Add the FOXY_API_REFRESH_TOKEN credential here"
+  FOXY_WEBHOOK_ENCRYPTION_KEY= "We will add this one later"
