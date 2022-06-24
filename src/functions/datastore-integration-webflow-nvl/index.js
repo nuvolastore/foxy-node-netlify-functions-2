@@ -92,7 +92,7 @@ async function patchItem(item) {
     {
       collectionId: collectionId,
       fields: {
-        "size-quantity": item["size-quantity"],
+        sizes: item["sizes"],
       },
       itemId: item._id,
     },
@@ -110,7 +110,7 @@ async function patchItem(item) {
  */
 function updateInventorySizeField(foxyItem, webFlowItem) {
   const { quantity, size } = foxyItem;
-  let wfSizeObject = webFlowItem["size-quantity"]
+  let wfSizeObject = webFlowItem["sizes"]
     .split(",")
     .map((size) => size.split(":"));
   wfSizeObject = Object.fromEntries(wfSizeObject);
@@ -119,7 +119,7 @@ function updateInventorySizeField(foxyItem, webFlowItem) {
     wfSizeObject[size.value] =
       Number(wfSizeObject[size.value]) - Number(quantity);
 
-  webFlowItem["size-quantity"] = objToString(wfSizeObject);
+  webFlowItem["sizes"] = objToString(wfSizeObject);
   console.log("I'm the webflowItem Patched to send: ", webFlowItem);
   return webFlowItem;
 }
@@ -177,14 +177,14 @@ function fetchItem(cache, foxyItem, offset = 0) {
         {
           limit: WEBFLOW_LIMIT,
           offset,
-          sort: ["code", "ASC"],
+          sort: ["sku-2", "ASC"],
         }
       )
       .then((collection) => {
         cache.addItems(collectionId, collection.items);
         let code_exists = null;
         const match = collection.items.find((e) => {
-          const wfItemCode = iGet(e, "code");
+          const wfItemCode = iGet(e, "sku-2");
           if (wfItemCode === undefined) {
             if (code_exists === null) {
               code_exists = false;
@@ -261,7 +261,7 @@ function createCache() {
       }
       return this.cache[collection].find((e) => {
         const itemCode = item.code;
-        const wfCode = getOption(e, "code").value;
+        const wfCode = getOption(e, "sku-2").value;
         return (
           itemCode &&
           wfCode &&
